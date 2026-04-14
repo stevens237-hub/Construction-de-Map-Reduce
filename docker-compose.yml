@@ -1,0 +1,73 @@
+
+services:
+
+  coordinator:
+    build:
+      context: .
+      dockerfile: src/coordinator/Dockerfile
+    container_name: coordinator
+    hostname: coordinator
+    environment:
+      - MAP_WORKERS=map-worker-1:5000,map-worker-2:5000
+      - REDUCE_WORKERS=reduce-worker-1:6000,reduce-worker-2:6000
+      - NB_REDUCES=2
+      - TEXTS_DIR=/app/texts
+    volumes:
+      - ./texts:/app/texts
+    networks:
+      - mapreduce-net
+    depends_on:
+      - map-worker-1
+      - map-worker-2
+      - reduce-worker-1
+      - reduce-worker-2
+
+  map-worker-1:
+    build:
+      context: .
+      dockerfile: src/mapworker/Dockerfile
+    container_name: map-worker-1
+    hostname: map-worker-1
+    volumes:
+      - ./texts:/app/texts
+    networks:
+      - mapreduce-net
+
+  map-worker-2:
+    build:
+      context: .
+      dockerfile: src/mapworker/Dockerfile
+    container_name: map-worker-2
+    hostname: map-worker-2
+    volumes:
+      - ./texts:/app/texts
+    networks:
+      - mapreduce-net
+
+  reduce-worker-1:
+    build:
+      context: .
+      dockerfile: src/reduceworker/Dockerfile
+    container_name: reduce-worker-1
+    hostname: reduce-worker-1
+    environment:
+      - WORKER_ID=0
+      - NB_REDUCES=2
+    networks:
+      - mapreduce-net
+
+  reduce-worker-2:
+    build:
+      context: .
+      dockerfile: src/reduceworker/Dockerfile
+    container_name: reduce-worker-2
+    hostname: reduce-worker-2
+    environment:
+      - WORKER_ID=1
+      - NB_REDUCES=2
+    networks:
+      - mapreduce-net
+
+networks:
+  mapreduce-net:
+    driver: bridge
