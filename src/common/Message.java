@@ -12,39 +12,33 @@ public class Message implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** Type du message, défini dans Protocol */
-    private final int type;
+    /** Type du message, défini dans MessageType. */
+    private final MessageType type;
 
-    /** Données textuelles (ex: nom de fichier, identifiant du worker) */
+    /** Données textuelles (ex: nom de fichier, identifiant du worker). */
     private String data;
 
-    /** Résultats intermédiaires : mot -> nombre d'occurrences */
+    /** Résultats intermédiaires : mot -> nombre d'occurrences. */
     private Map<String, Integer> wordCounts;
 
-    /**
-     * Constructeur simple (sans données additionnelles).
-     */
-    public Message(int type) {
+    /** Constructeur simple (sans données additionnelles). */
+    public Message(MessageType type) {
         this.type = type;
     }
 
-    /**
-     * Constructeur avec une donnée textuelle (ex: nom de fichier).
-     */
-    public Message(int type, String data) {
+    /** Constructeur avec une donnée textuelle (ex: nom de fichier). */
+    public Message(MessageType type, String data) {
         this.type = type;
         this.data = data;
     }
 
-    /**
-     * Constructeur avec un dictionnaire de comptages.
-     */
-    public Message(int type, Map<String, Integer> wordCounts) {
+    /** Constructeur avec un dictionnaire de comptages. */
+    public Message(MessageType type, Map<String, Integer> wordCounts) {
         this.type = type;
         this.wordCounts = new HashMap<>(wordCounts);
     }
 
-    public int getType() {
+    public MessageType getType() {
         return type;
     }
 
