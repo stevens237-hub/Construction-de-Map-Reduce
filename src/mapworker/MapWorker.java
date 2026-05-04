@@ -4,9 +4,15 @@ import common.Message;
 import common.MessageType;
 import common.Protocol;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -119,36 +125,42 @@ public class MapWorker {
 
     private static void processFile(String filePath, long offset, long length) {
         System.out.println("Processing " + filePath + " [offset=" + offset + ", length=" + length + "]");
-        try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
-            raf.seek(offset);
+        try (FileChannel channel = FileChannel.open(Paths.get(filePath), StandardOpenOption.READ)) {
+            channel.position(offset);
 
-            // Si on n'est pas au début du fichier, sauter jusqu'au prochain mot complet
-            // pour éviter de compter un mot coupé à la frontière du bloc
-            if (offset > 0) {
-                int b;
-                do { b = raf.read(); } while (b != -1 && !Character.isWhitespace((char) b));
-                if (b == -1) return;
-            }
-
-            long end = offset + length;
+            ByteBuffer buf = ByteBuffer.allocate(65536); // lecture par blocs de 64 KB
             StringBuilder word = new StringBuilder();
-            int b;
+            long pos = offset;
+            long end = offset + length;
+            boolean skipPartialWord = offset > 0;
 
-            while ((b = raf.read()) != -1) {
-                char c = (char) b;
-                if (Character.isLetterOrDigit(c)) {
-                    word.append(c);
-                } else {
-                    if (word.length() > 0) {
-                        currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
-                        word.setLength(0);
+            loop:
+            while (channel.read(buf) > 0) {
+                buf.flip();
+                while (buf.hasRemaining()) {
+                    char c = (char) (buf.get() & 0xFF);
+                    pos++;
+
+                    // Sauter le mot partiel à la frontière du bloc
+                    if (skipPartialWord) {
+                        if (Character.isWhitespace(c)) skipPartialWord = false;
+                        continue;
                     }
-                    // Arrêter après la fin du bloc, mais seulement à une frontière de mot
-                    if (raf.getFilePointer() > end) break;
+
+                    if (Character.isLetterOrDigit(c)) {
+                        word.append(c);
+                    } else {
+                        if (word.length() > 0) {
+                            currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
+                            word.setLength(0);
+                        }
+                        if (pos > end) break loop;
+                    }
                 }
+                buf.clear();
             }
             // Dernier mot sans espace final
-            if (word.length() > 0) {
+            if (!skipPartialWord && word.length() > 0) {
                 currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
             }
 

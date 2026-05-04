@@ -24,7 +24,7 @@ public class Protocol {
     // -------------------------------------------------------------------------
 
     /** Délai maximum (ms) pour qu'un worker réponde avant d'être considéré en panne. */
-    public static final int TIMEOUT_MS = 10_000;
+    public static final int TIMEOUT_MS = 60_000;
 
     /** Nombre maximum de tentatives en cas d'échec d'une tâche map. */
     public static final int MAX_RETRIES = 3;
