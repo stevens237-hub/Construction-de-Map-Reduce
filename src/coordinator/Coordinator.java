@@ -386,35 +386,37 @@ public class Coordinator {
         String bot   = "╚══════════════════════════════════════════════════╝";
         int W = 50;
 
-        System.out.println(top);
-        System.out.println(row("       STATISTIQUES MAPREDUCE", W));
-        System.out.println(sep);
         long nbFiles = splits.stream().map(s -> s.path).distinct().count();
-        System.out.println(row("  Fichiers : " + nbFiles + "   Splits : " + splits.size()
-                + "   Mappers : " + nbMappers + "   Reducers : " + nbReducers, W));
-        System.out.println(row("  Total mots    : " + String.format("%,d", totalWords), W));
-        System.out.println(row("  Mots uniques  : " + String.format("%,d", uniqueWords)
-                + "  (richesse : " + String.format("%.1f", richesse) + "%)", W));
-        System.out.println(sep);
-        System.out.println(row("  PHASE MAP                       " + mapDuration + " ms", W));
+        StringBuilder sb = new StringBuilder();
+        sb.append('\n').append(top).append('\n');
+        sb.append(row("       STATISTIQUES MAPREDUCE", W)).append('\n');
+        sb.append(sep).append('\n');
+        sb.append(row("  Fichiers : " + nbFiles + "   Splits : " + splits.size(), W)).append('\n');
+        sb.append(row("  Mappers : " + nbMappers + "   Reducers : " + nbReducers, W)).append('\n');
+        sb.append(row("  Total mots    : " + String.format("%,d", totalWords), W)).append('\n');
+        sb.append(row("  Mots uniques  : " + String.format("%,d", uniqueWords)
+                + "  (richesse : " + String.format("%.1f", richesse) + "%)", W)).append('\n');
+        sb.append(sep).append('\n');
+        sb.append(row("  PHASE MAP                       " + mapDuration + " ms", W)).append('\n');
         for (MapStat s : mapStats) {
             String displayName = workerNames.getOrDefault(s.worker, s.worker);
-            System.out.println(row("    " + displayName + "  :  " + s.processingTimeMs
-                    + " ms   " + String.format("%,d", s.totalWords) + " mots", W));
+            sb.append(row("    " + displayName + "  :  " + s.processingTimeMs
+                    + " ms   " + String.format("%,d", s.totalWords) + " mots", W)).append('\n');
         }
         if (wordsByMapper.size() > 1) {
-            System.out.println(row("  Déséquilibre MAP  :  " + String.format("%.1f", imbalance) + "%", W));
+            sb.append(row("  Déséquilibre MAP  :  " + String.format("%.1f", imbalance) + "%", W)).append('\n');
         }
-        System.out.println(sep);
-        System.out.println(row("  PHASE REDUCE                    " + reduceDuration + " ms", W));
+        sb.append(sep).append('\n');
+        sb.append(row("  PHASE REDUCE                    " + reduceDuration + " ms", W)).append('\n');
         for (ReduceStat s : reduceStats) {
             String displayName = workerNames.getOrDefault(s.worker, s.worker);
-            System.out.println(row("    " + displayName + "  :  " + s.processingTimeMs + " ms", W));
+            sb.append(row("    " + displayName + "  :  " + s.processingTimeMs + " ms", W)).append('\n');
         }
-        System.out.println(sep);
-        System.out.println(row("  TOTAL                           " + totalDuration + " ms", W));
-        System.out.println(row("  Débit  :  " + String.format("%.2f", debitMBs) + " MB/s", W));
-        System.out.println(bot);
+        sb.append(sep).append('\n');
+        sb.append(row("  TOTAL                           " + totalDuration + " ms", W)).append('\n');
+        sb.append(row("  Débit  :  " + String.format("%.2f", debitMBs) + " MB/s", W)).append('\n');
+        sb.append(bot);
+        System.out.println(sb);
     }
 
     private static String row(String content, int width) {
