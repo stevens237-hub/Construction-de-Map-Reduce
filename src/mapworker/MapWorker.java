@@ -16,10 +16,12 @@ import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class MapWorker {
 
     private static final Map<String, Integer> currentCounts = new ConcurrentHashMap<>();
+    private static final AtomicLong totalWordsProcessed = new AtomicLong(0);
     private static volatile boolean running = true;
     private static int nbReduces;
 
@@ -88,8 +90,11 @@ public class MapWorker {
 
             switch (request.getType()) {
                 case MAP_START:
-                    processFile(request.getData(), request.getOffset(), request.getLength());
-                    out.writeObject(new Message(MessageType.MAP_SUCCESS));
+                    long start = System.currentTimeMillis();
+                    long wordsInSplit = processFile(request.getData(), request.getOffset(), request.getLength());
+                    long elapsed = System.currentTimeMillis() - start;
+                    // MAP_SUCCESS transporte le nombre de mots et le temps de traitement
+                    out.writeObject(new Message(MessageType.MAP_SUCCESS, wordsInSplit, elapsed));
                     out.flush();
                     break;
 
@@ -121,14 +126,16 @@ public class MapWorker {
 
     // -------------------------------------------------------------------------
     // Lecture du fichier avec gestion des blocs (offset + length)
+    // Retourne le nombre total de mots comptés (avec doublons)
     // -------------------------------------------------------------------------
 
-    private static void processFile(String filePath, long offset, long length) {
+    private static long processFile(String filePath, long offset, long length) {
         System.out.println("Processing " + filePath + " [offset=" + offset + ", length=" + length + "]");
+        long wordCount = 0;
         try (FileChannel channel = FileChannel.open(Paths.get(filePath), StandardOpenOption.READ)) {
             channel.position(offset);
 
-            ByteBuffer buf = ByteBuffer.allocate(65536); // lecture par blocs de 64 KB
+            ByteBuffer buf = ByteBuffer.allocate(65536);
             StringBuilder word = new StringBuilder();
             long pos = offset;
             long end = offset + length;
@@ -141,7 +148,6 @@ public class MapWorker {
                     char c = (char) (buf.get() & 0xFF);
                     pos++;
 
-                    // Sauter le mot partiel à la frontière du bloc
                     if (skipPartialWord) {
                         if (Character.isWhitespace(c)) skipPartialWord = false;
                         continue;
@@ -152,6 +158,7 @@ public class MapWorker {
                     } else {
                         if (word.length() > 0) {
                             currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
+                            wordCount++;
                             word.setLength(0);
                         }
                         if (pos > end) break loop;
@@ -159,14 +166,17 @@ public class MapWorker {
                 }
                 buf.clear();
             }
-            // Dernier mot sans espace final
             if (!skipPartialWord && word.length() > 0) {
                 currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
+                wordCount++;
             }
 
-            System.out.println("Done. Total unique words so far: " + currentCounts.size());
+            totalWordsProcessed.addAndGet(wordCount);
+            System.out.println("Done. Words in split: " + wordCount
+                    + " | Unique words total: " + currentCounts.size());
         } catch (IOException e) {
             System.err.println("Error reading " + filePath + ": " + e.getMessage());
         }
+        return wordCount;
     }
 }

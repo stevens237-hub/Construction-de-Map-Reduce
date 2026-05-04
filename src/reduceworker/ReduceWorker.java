@@ -83,9 +83,11 @@ public class ReduceWorker {
 
             switch (request.getType()) {
                 case REDUCE_START:
+                    long start = System.currentTimeMillis();
                     String[] mapWorkers = request.getData().split(",");
                     fetchFromAllMapWorkers(mapWorkers);
-                    out.writeObject(new Message(MessageType.REDUCE_SUCCESS, globalMap));
+                    long elapsed = System.currentTimeMillis() - start;
+                    out.writeObject(new Message(MessageType.REDUCE_SUCCESS, globalMap, elapsed));
                     out.flush();
                     break;
 

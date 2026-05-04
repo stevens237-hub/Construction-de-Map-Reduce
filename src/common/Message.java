@@ -12,39 +12,37 @@ public class Message implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** Type du message, défini dans MessageType. */
     private final MessageType type;
-
-    /** Données textuelles (ex: nom de fichier, identifiant du worker). */
     private String data;
-
-    /** Résultats intermédiaires : mot -> nombre d'occurrences. */
     private Map<String, Integer> wordCounts;
-
-    /** Offset de début dans le fichier (pour le découpage des gros fichiers). */
     private long offset = 0;
-
-    /** Nombre d'octets à lire depuis l'offset (-1 = jusqu'à la fin). */
     private long length = -1;
 
-    /** Constructeur simple (sans données additionnelles). */
+    /** Temps de traitement mesuré par le worker (ms). -1 si non renseigné. */
+    private long processingTimeMs = -1;
+
+    /** Nombre total de mots comptés (avec doublons). -1 si non renseigné. */
+    private long totalWords = -1;
+
+    // -------------------------------------------------------------------------
+    // Constructeurs
+    // -------------------------------------------------------------------------
+
     public Message(MessageType type) {
         this.type = type;
     }
 
-    /** Constructeur avec une donnée textuelle (ex: nom de fichier). */
     public Message(MessageType type, String data) {
         this.type = type;
         this.data = data;
     }
 
-    /** Constructeur avec un dictionnaire de comptages. */
     public Message(MessageType type, Map<String, Integer> wordCounts) {
         this.type = type;
         this.wordCounts = new HashMap<>(wordCounts);
     }
 
-    /** Constructeur pour MAP_START avec offset et length (découpage de gros fichiers). */
+    /** Pour MAP_START avec découpage (offset + length). */
     public Message(MessageType type, String data, long offset, long length) {
         this.type = type;
         this.data = data;
@@ -52,11 +50,31 @@ public class Message implements Serializable {
         this.length = length;
     }
 
-    public MessageType getType()             { return type; }
-    public String getData()                  { return data; }
-    public Map<String, Integer> getWordCounts() { return wordCounts; }
-    public long getOffset()                  { return offset; }
-    public long getLength()                  { return length; }
+    /** Pour MAP_SUCCESS avec métriques. */
+    public Message(MessageType type, long totalWords, long processingTimeMs) {
+        this.type = type;
+        this.totalWords = totalWords;
+        this.processingTimeMs = processingTimeMs;
+    }
+
+    /** Pour REDUCE_SUCCESS avec métriques. */
+    public Message(MessageType type, Map<String, Integer> wordCounts, long processingTimeMs) {
+        this.type = type;
+        this.wordCounts = new HashMap<>(wordCounts);
+        this.processingTimeMs = processingTimeMs;
+    }
+
+    // -------------------------------------------------------------------------
+    // Getters
+    // -------------------------------------------------------------------------
+
+    public MessageType getType()                    { return type; }
+    public String getData()                         { return data; }
+    public Map<String, Integer> getWordCounts()     { return wordCounts; }
+    public long getOffset()                         { return offset; }
+    public long getLength()                         { return length; }
+    public long getProcessingTimeMs()               { return processingTimeMs; }
+    public long getTotalWords()                     { return totalWords; }
 
     @Override
     public String toString() {

@@ -12,8 +12,10 @@ services:
       - REDUCE_WORKERS=reduce-worker-1:6000,reduce-worker-2:6000
       - NB_REDUCES=2
       - TEXTS_DIR=/app/texts
+      - OUTPUT_DIR=/app/output
     volumes:
       - ./texts:/app/texts
+      - ./output:/app/output
     networks:
       - mapreduce-net
 
