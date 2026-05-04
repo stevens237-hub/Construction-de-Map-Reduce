@@ -60,27 +60,42 @@ public class Coordinator {
     public static void main(String[] args) {
         System.out.println("Coordinator started");
 
-        String mapWorkersEnv    = System.getenv("MAP_WORKERS");
-        String reduceWorkersEnv = System.getenv("REDUCE_WORKERS");
-        String textsDir         = System.getenv("TEXTS_DIR");
-        String outputDir        = System.getenv("OUTPUT_DIR");
+        List<String> discoveredMapWorkers = new ArrayList<>();
+        List<String> discoveredReduceWorkers = new ArrayList<>();
+        
+        // Mapping pour l'affichage des stats
+        Map<String, String> workerNames = new HashMap<>();
 
-        if (mapWorkersEnv == null || reduceWorkersEnv == null || textsDir == null || outputDir == null) {
-            System.err.println("Missing env vars: MAP_WORKERS, REDUCE_WORKERS, TEXTS_DIR, OUTPUT_DIR");
+        String textsDir  = System.getenv("TEXTS_DIR");
+        String outputDir = System.getenv("OUTPUT_DIR");
+
+        if (textsDir == null || outputDir == null) {
+            System.err.println("Missing env vars: TEXTS_DIR, OUTPUT_DIR");
             return;
         }
-
-        String[] mapWorkers    = mapWorkersEnv.split(",");
-        String[] reduceWorkers = reduceWorkersEnv.split(",");
-        int totalWorkers       = mapWorkers.length + reduceWorkers.length;
 
         // Phase 0 — attendre que tous les workers soient prêts
-        System.out.println("Waiting for " + totalWorkers + " workers to be ready...");
-        if (!waitForWorkers(totalWorkers)) {
-            System.err.println("Timeout waiting for workers. Aborting.");
+        System.out.println("Waiting for workers to be ready...");
+        int totalExpected = 0;
+        try {
+            totalExpected = Integer.parseInt(System.getenv("NB_MAPS")) + Integer.parseInt(System.getenv("NB_REDUCES"));
+        } catch (Exception e) {
+            System.err.println("NB_MAPS or NB_REDUCES not set or invalid. Defaulting to 4 workers total.");
+            totalExpected = 4;
+        }
+
+        if (!waitForWorkers(totalExpected, discoveredMapWorkers, discoveredReduceWorkers, workerNames)) {
+            System.err.println("Timeout waiting for workers. Proceeding with " + (discoveredMapWorkers.size() + discoveredReduceWorkers.size()) + " workers.");
+        }
+        System.out.println("Discovered " + discoveredMapWorkers.size() + " MapWorkers and " + discoveredReduceWorkers.size() + " ReduceWorkers.");
+
+        if (discoveredMapWorkers.isEmpty() || discoveredReduceWorkers.isEmpty()) {
+            System.err.println("Need at least 1 MapWorker and 1 ReduceWorker. Aborting.");
             return;
         }
-        System.out.println("All workers ready.");
+
+        String[] mapWorkers = discoveredMapWorkers.toArray(new String[0]);
+        String[] reduceWorkers = discoveredReduceWorkers.toArray(new String[0]);
 
         long totalStart = System.currentTimeMillis();
 
@@ -104,7 +119,7 @@ public class Coordinator {
 
         List<MapStat> mapStats = Collections.synchronizedList(new ArrayList<>());
         long mapStart = System.currentTimeMillis();
-        boolean mapOk = runMapPhase(splits, mapWorkers, mapStats);
+        boolean mapOk = runMapPhase(splits, mapWorkers, discoveredReduceWorkers.size(), mapStats);
         long mapDuration = System.currentTimeMillis() - mapStart;
 
         if (!mapOk) {
@@ -115,7 +130,10 @@ public class Coordinator {
         System.out.println("--- Reduce Phase ---");
         List<ReduceStat> reduceStats = Collections.synchronizedList(new ArrayList<>());
         long reduceStart = System.currentTimeMillis();
-        List<Map<String, Integer>> partialResults = runReducePhase(reduceWorkers, mapWorkersEnv, reduceStats);
+        
+        // On construit la liste des mappers pour les reducers
+        String mapWorkersStr = String.join(",", mapWorkers);
+        List<Map<String, Integer>> partialResults = runReducePhase(reduceWorkers, mapWorkersStr, reduceStats);
         long reduceDuration = System.currentTimeMillis() - reduceStart;
 
         // Phase 3 — agrégation finale
@@ -137,7 +155,7 @@ public class Coordinator {
 
         writeOutput(finalMap, outputDir);
         printStatistics(mapStats, reduceStats, finalMap, splits, mapWorkers.length,
-                reduceWorkers.length, mapDuration, reduceDuration, totalDuration, totalDataBytes);
+                reduceWorkers.length, mapDuration, reduceDuration, totalDuration, totalDataBytes, workerNames);
 
         // Shutdown
         System.out.println("--- Shutting down workers ---");
@@ -151,11 +169,11 @@ public class Coordinator {
     // Phase 0 : attendre les READY
     // -------------------------------------------------------------------------
 
-    private static boolean waitForWorkers(int total) {
+    private static boolean waitForWorkers(int total, List<String> maps, List<String> reduces, Map<String, String> workerNames) {
         CountDownLatch latch = new CountDownLatch(total);
         try (ServerSocket ss = new ServerSocket(Protocol.COORDINATOR_READY_PORT)) {
             ss.setSoTimeout(5_000);
-            long deadline = System.currentTimeMillis() + 30_000;
+            long deadline = System.currentTimeMillis() + 60_000;
 
             while (latch.getCount() > 0 && System.currentTimeMillis() < deadline) {
                 try {
@@ -165,8 +183,27 @@ public class Coordinator {
                              ObjectInputStream in = new ObjectInputStream(client.getInputStream())) {
                             Message msg = (Message) in.readObject();
                             if (msg.getType() == MessageType.READY) {
-                                System.out.println("  READY: " + msg.getData());
-                                latch.countDown();
+                                String rawData = msg.getData();
+                                System.out.println("  READY: " + rawData);
+                                synchronized (maps) {
+                                    if (rawData.startsWith("MAP:")) {
+                                        String workerHost = rawData.substring(4);
+                                        String fullAddr = workerHost + ":" + Protocol.MAP_WORKER_PORT;
+                                        if (!maps.contains(fullAddr)) {
+                                            maps.add(fullAddr);
+                                            workerNames.put(fullAddr, "Mapper-" + maps.size());
+                                            latch.countDown();
+                                        }
+                                    } else if (rawData.startsWith("REDUCE:")) {
+                                        String workerHost = rawData.substring(7);
+                                        String fullAddr = workerHost + ":" + Protocol.REDUCE_WORKER_PORT;
+                                        if (!reduces.contains(fullAddr)) {
+                                            reduces.add(fullAddr);
+                                            workerNames.put(fullAddr, "Reducer-" + reduces.size());
+                                            latch.countDown();
+                                        }
+                                    }
+                                }
                             }
                         } catch (Exception e) {
                             System.err.println("Error reading READY: " + e.getMessage());
@@ -213,7 +250,7 @@ public class Coordinator {
     // Phase 1 : exécution des tâches map avec retry
     // -------------------------------------------------------------------------
 
-    private static boolean runMapPhase(List<FileSplit> splits, String[] mapWorkers, List<MapStat> stats) {
+    private static boolean runMapPhase(List<FileSplit> splits, String[] mapWorkers, int nbReduces, List<MapStat> stats) {
         AtomicInteger failures = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(splits.size());
 
@@ -225,7 +262,7 @@ public class Coordinator {
                 MapStat stat = null;
                 for (int retry = 0; retry < Protocol.MAX_RETRIES && stat == null; retry++) {
                     String worker = mapWorkers[(idx + retry) % mapWorkers.length];
-                    stat = sendMapTask(worker, split);
+                    stat = sendMapTask(worker, split, nbReduces);
                     if (stat == null && retry < Protocol.MAX_RETRIES - 1) {
                         System.err.println("Retry " + (retry + 1) + " for " + split);
                     }
@@ -248,14 +285,14 @@ public class Coordinator {
         return failures.get() == 0;
     }
 
-    private static MapStat sendMapTask(String worker, FileSplit split) {
+    private static MapStat sendMapTask(String worker, FileSplit split, int nbReduces) {
         String[] parts = worker.split(":");
         try (Socket socket = new Socket(parts[0], Integer.parseInt(parts[1]));
              ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
              ObjectInputStream in   = new ObjectInputStream(socket.getInputStream())) {
 
             socket.setSoTimeout(Protocol.TIMEOUT_MS);
-            out.writeObject(new Message(MessageType.MAP_START, split.path, split.offset, split.length));
+            out.writeObject(new Message(MessageType.MAP_START, split.path, split.offset, split.length, nbReduces));
             out.flush();
 
             Message response = (Message) in.readObject();
@@ -276,36 +313,35 @@ public class Coordinator {
     // Phase 2 : exécution des tâches reduce
     // -------------------------------------------------------------------------
 
-    private static List<Map<String, Integer>> runReducePhase(String[] reduceWorkers,
-                                                              String mapWorkersEnv,
-                                                              List<ReduceStat> stats) {
+    private static List<Map<String, Integer>> runReducePhase(String[] reduceWorkers, String mappersStr, List<ReduceStat> stats) {
         List<Map<String, Integer>> results = Collections.synchronizedList(new ArrayList<>());
         CountDownLatch latch = new CountDownLatch(reduceWorkers.length);
 
-        for (String worker : reduceWorkers) {
+        for (int i = 0; i < reduceWorkers.length; i++) {
+            final String worker = reduceWorkers[i];
+            final int id = i;
             new Thread(() -> {
-                String[] parts = worker.split(":");
-                int reducerTimeout = Protocol.TIMEOUT_MS * mapWorkersEnv.split(",").length * 2;
-                try (Socket socket = new Socket(parts[0], Integer.parseInt(parts[1]));
+                try (Socket socket = new Socket(worker.split(":")[0], Integer.parseInt(worker.split(":")[1]));
                      ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-                     ObjectInputStream in   = new ObjectInputStream(socket.getInputStream())) {
-
-                    socket.setSoTimeout(reducerTimeout);
-                    out.writeObject(new Message(MessageType.REDUCE_START, mapWorkersEnv));
+                     ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+                    
+                    socket.setSoTimeout(Protocol.TIMEOUT_MS * 10);
+                    // On envoie "id:X;mappers:map1,map2..."
+                    String data = "id:" + id + ";mappers:" + mappersStr;
+                    out.writeObject(new Message(MessageType.REDUCE_START, data));
                     out.flush();
 
-                    Message response = (Message) in.readObject();
-                    if (response.getType() == MessageType.REDUCE_SUCCESS) {
-                        results.add(response.getWordCounts());
-                        stats.add(new ReduceStat(worker, response.getProcessingTimeMs()));
+                    Message resp = (Message) in.readObject();
+                    if (resp.getType() == MessageType.REDUCE_SUCCESS) {
+                        results.add(resp.getWordCounts());
+                        stats.add(new ReduceStat(worker, resp.getProcessingTimeMs()));
                         System.out.println("Reduce OK on " + worker
-                                + " (" + response.getProcessingTimeMs() + " ms)");
+                                + " (" + resp.getProcessingTimeMs() + " ms)");
                     }
                 } catch (Exception e) {
-                    System.err.println("Reduce error [" + worker + "]: " + e.getMessage());
-                } finally {
-                    latch.countDown();
+                    System.err.println("Error on reduce worker " + worker + ": " + e.getMessage());
                 }
+                latch.countDown();
             }).start();
         }
 
@@ -325,7 +361,7 @@ public class Coordinator {
                                         Map<String, Integer> finalMap, List<FileSplit> splits,
                                         int nbMappers, int nbReducers,
                                         long mapDuration, long reduceDuration, long totalDuration,
-                                        long totalDataBytes) {
+                                        long totalDataBytes, Map<String, String> workerNames) {
 
         long totalWords  = mapStats.stream().mapToLong(s -> s.totalWords).sum();
         long uniqueWords = finalMap.size();
@@ -362,8 +398,8 @@ public class Coordinator {
         System.out.println(sep);
         System.out.println(row("  PHASE MAP                       " + mapDuration + " ms", W));
         for (MapStat s : mapStats) {
-            String workerName = s.worker.split(":")[0];
-            System.out.println(row("    " + workerName + "  :  " + s.processingTimeMs
+            String displayName = workerNames.getOrDefault(s.worker, s.worker);
+            System.out.println(row("    " + displayName + "  :  " + s.processingTimeMs
                     + " ms   " + String.format("%,d", s.totalWords) + " mots", W));
         }
         if (wordsByMapper.size() > 1) {
@@ -372,8 +408,8 @@ public class Coordinator {
         System.out.println(sep);
         System.out.println(row("  PHASE REDUCE                    " + reduceDuration + " ms", W));
         for (ReduceStat s : reduceStats) {
-            String workerName = s.worker.split(":")[0];
-            System.out.println(row("    " + workerName + "  :  " + s.processingTimeMs + " ms", W));
+            String displayName = workerNames.getOrDefault(s.worker, s.worker);
+            System.out.println(row("    " + displayName + "  :  " + s.processingTimeMs + " ms", W));
         }
         System.out.println(sep);
         System.out.println(row("  TOTAL                           " + totalDuration + " ms", W));

@@ -26,15 +26,14 @@ public class MapWorker {
     private static int nbReduces;
 
     public static void main(String[] args) {
-        String nbReducesStr    = System.getenv("NB_REDUCES");
+        // nbReduces sera mis à jour dynamiquement via le message MAP_START
         String coordinatorHost = System.getenv("COORDINATOR_HOST");
         String hostname        = System.getenv("HOSTNAME");
 
-        if (nbReducesStr == null || coordinatorHost == null) {
-            System.err.println("Missing env vars: NB_REDUCES, COORDINATOR_HOST");
+        if (coordinatorHost == null) {
+            System.err.println("Missing env var: COORDINATOR_HOST");
             return;
         }
-        nbReduces = Integer.parseInt(nbReducesStr);
         String workerId = hostname != null ? hostname : "map-worker";
 
         try (ServerSocket serverSocket = new ServerSocket(Protocol.MAP_WORKER_PORT)) {
@@ -63,7 +62,7 @@ public class MapWorker {
                 try (Socket s = new Socket(coordinatorHost, Protocol.COORDINATOR_READY_PORT);
                      ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream())) {
                     s.setSoTimeout(Protocol.TIMEOUT_MS);
-                    out.writeObject(new Message(MessageType.READY, workerId));
+                    out.writeObject(new Message(MessageType.READY, "MAP:" + workerId));
                     out.flush();
                 }
                 System.out.println("READY sent to coordinator.");
@@ -91,6 +90,7 @@ public class MapWorker {
             switch (request.getType()) {
                 case MAP_START:
                     long start = System.currentTimeMillis();
+                    nbReduces = request.getNbReduces(); // Mise à jour dynamique
                     long wordsInSplit = processFile(request.getData(), request.getOffset(), request.getLength());
                     long elapsed = System.currentTimeMillis() - start;
                     // MAP_SUCCESS transporte le nombre de mots et le temps de traitement

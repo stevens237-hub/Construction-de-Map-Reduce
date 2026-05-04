@@ -6,11 +6,9 @@ services:
       context: .
       dockerfile: src/coordinator/Dockerfile
     container_name: coordinator
-    hostname: coordinator
     environment:
-      - MAP_WORKERS=map-worker-1:5000,map-worker-2:5000
-      - REDUCE_WORKERS=reduce-worker-1:6000,reduce-worker-2:6000
-      - NB_REDUCES=2
+      - NB_MAPS=${NB_MAPS:-2}
+      - NB_REDUCES=${NB_REDUCES:-2}
       - TEXTS_DIR=/app/texts
       - OUTPUT_DIR=/app/output
     volumes:
@@ -19,14 +17,11 @@ services:
     networks:
       - mapreduce-net
 
-  map-worker-1:
+  map-worker:
     build:
       context: .
       dockerfile: src/mapworker/Dockerfile
-    container_name: map-worker-1
-    hostname: map-worker-1
     environment:
-      - NB_REDUCES=2
       - COORDINATOR_HOST=coordinator
     volumes:
       - ./texts:/app/texts
@@ -35,46 +30,11 @@ services:
     depends_on:
       - coordinator
 
-  map-worker-2:
-    build:
-      context: .
-      dockerfile: src/mapworker/Dockerfile
-    container_name: map-worker-2
-    hostname: map-worker-2
-    environment:
-      - NB_REDUCES=2
-      - COORDINATOR_HOST=coordinator
-    volumes:
-      - ./texts:/app/texts
-    networks:
-      - mapreduce-net
-    depends_on:
-      - coordinator
-
-  reduce-worker-1:
+  reduce-worker:
     build:
       context: .
       dockerfile: src/reduceworker/Dockerfile
-    container_name: reduce-worker-1
-    hostname: reduce-worker-1
     environment:
-      - WORKER_ID=0
-      - NB_REDUCES=2
-      - COORDINATOR_HOST=coordinator
-    networks:
-      - mapreduce-net
-    depends_on:
-      - coordinator
-
-  reduce-worker-2:
-    build:
-      context: .
-      dockerfile: src/reduceworker/Dockerfile
-    container_name: reduce-worker-2
-    hostname: reduce-worker-2
-    environment:
-      - WORKER_ID=1
-      - NB_REDUCES=2
       - COORDINATOR_HOST=coordinator
     networks:
       - mapreduce-net

@@ -18,16 +18,15 @@ public class ReduceWorker {
     private static int workerId;
 
     public static void main(String[] args) {
-        String workerIdStr     = System.getenv("WORKER_ID");
         String coordinatorHost = System.getenv("COORDINATOR_HOST");
         String hostname        = System.getenv("HOSTNAME");
 
-        if (workerIdStr == null || coordinatorHost == null) {
-            System.err.println("Missing env vars: WORKER_ID, COORDINATOR_HOST");
+        if (coordinatorHost == null) {
+            System.err.println("Missing env var: COORDINATOR_HOST");
             return;
         }
-        workerId = Integer.parseInt(workerIdStr);
-        String workerName = hostname != null ? hostname : "reduce-worker-" + workerId;
+        workerId = 0; // Sera mis à jour par le message REDUCE_START
+        String workerName = hostname != null ? hostname : "reduce-worker";
 
         try (ServerSocket serverSocket = new ServerSocket(Protocol.REDUCE_WORKER_PORT)) {
             System.out.println("ReduceWorker " + workerId + " listening on port " + Protocol.REDUCE_WORKER_PORT);
@@ -55,7 +54,7 @@ public class ReduceWorker {
                 try (Socket s = new Socket(coordinatorHost, Protocol.COORDINATOR_READY_PORT);
                      ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream())) {
                     s.setSoTimeout(Protocol.TIMEOUT_MS);
-                    out.writeObject(new Message(MessageType.READY, workerName));
+                    out.writeObject(new Message(MessageType.READY, "REDUCE:" + workerName));
                     out.flush();
                 }
                 System.out.println("READY sent to coordinator.");
@@ -84,8 +83,21 @@ public class ReduceWorker {
             switch (request.getType()) {
                 case REDUCE_START:
                     long start = System.currentTimeMillis();
-                    String[] mapWorkers = request.getData().split(",");
-                    fetchFromAllMapWorkers(mapWorkers);
+                    
+                    // Format: "id:X;mappers:map1,map2..."
+                    String rawData = request.getData();
+                    String[] parts = rawData.split(";");
+                    
+                    for (String p : parts) {
+                        if (p.startsWith("id:")) {
+                            workerId = Integer.parseInt(p.substring(3));
+                        } else if (p.startsWith("mappers:")) {
+                            String mappersList = p.substring(8);
+                            String[] mappers = mappersList.split(",");
+                            fetchFromAllMapWorkers(mappers);
+                        }
+                    }
+                    
                     long elapsed = System.currentTimeMillis() - start;
                     out.writeObject(new Message(MessageType.REDUCE_SUCCESS, globalMap, elapsed));
                     out.flush();

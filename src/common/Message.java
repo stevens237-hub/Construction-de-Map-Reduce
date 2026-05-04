@@ -24,6 +24,9 @@ public class Message implements Serializable {
     /** Nombre total de mots comptés (avec doublons). -1 si non renseigné. */
     private long totalWords = -1;
 
+    /** Nombre de partitions de réduction (utilisé dynamiquement). */
+    private int nbReduces = 0;
+
     // -------------------------------------------------------------------------
     // Constructeurs
     // -------------------------------------------------------------------------
@@ -42,12 +45,13 @@ public class Message implements Serializable {
         this.wordCounts = new HashMap<>(wordCounts);
     }
 
-    /** Pour MAP_START avec découpage (offset + length). */
-    public Message(MessageType type, String data, long offset, long length) {
+    /** Pour MAP_START avec découpage (offset + length) et configuration dynamique. */
+    public Message(MessageType type, String data, long offset, long length, int nbReduces) {
         this.type = type;
         this.data = data;
         this.offset = offset;
         this.length = length;
+        this.nbReduces = nbReduces;
     }
 
     /** Pour MAP_SUCCESS avec métriques. */
@@ -75,6 +79,7 @@ public class Message implements Serializable {
     public long getLength()                         { return length; }
     public long getProcessingTimeMs()               { return processingTimeMs; }
     public long getTotalWords()                     { return totalWords; }
+    public int getNbReduces()                       { return nbReduces; }
 
     @Override
     public String toString() {
