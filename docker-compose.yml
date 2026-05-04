@@ -16,11 +16,6 @@ services:
       - ./texts:/app/texts
     networks:
       - mapreduce-net
-    depends_on:
-      - map-worker-1
-      - map-worker-2
-      - reduce-worker-1
-      - reduce-worker-2
 
   map-worker-1:
     build:
@@ -30,10 +25,13 @@ services:
     hostname: map-worker-1
     environment:
       - NB_REDUCES=2
+      - COORDINATOR_HOST=coordinator
     volumes:
       - ./texts:/app/texts
     networks:
       - mapreduce-net
+    depends_on:
+      - coordinator
 
   map-worker-2:
     build:
@@ -43,10 +41,13 @@ services:
     hostname: map-worker-2
     environment:
       - NB_REDUCES=2
+      - COORDINATOR_HOST=coordinator
     volumes:
       - ./texts:/app/texts
     networks:
       - mapreduce-net
+    depends_on:
+      - coordinator
 
   reduce-worker-1:
     build:
@@ -57,8 +58,11 @@ services:
     environment:
       - WORKER_ID=0
       - NB_REDUCES=2
+      - COORDINATOR_HOST=coordinator
     networks:
       - mapreduce-net
+    depends_on:
+      - coordinator
 
   reduce-worker-2:
     build:
@@ -69,8 +73,11 @@ services:
     environment:
       - WORKER_ID=1
       - NB_REDUCES=2
+      - COORDINATOR_HOST=coordinator
     networks:
       - mapreduce-net
+    depends_on:
+      - coordinator
 
 networks:
   mapreduce-net:

@@ -7,96 +7,154 @@ import common.Protocol;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MapWorker {
+
     private static final Map<String, Integer> currentCounts = new ConcurrentHashMap<>();
     private static volatile boolean running = true;
     private static int nbReduces;
 
     public static void main(String[] args) {
-        System.out.println("MapWorker started");
-        
-        String nbReducesStr = System.getenv("NB_REDUCES");
-        if (nbReducesStr == null) {
-            System.err.println("Error: NB_REDUCES environment variable not set.");
+        String nbReducesStr    = System.getenv("NB_REDUCES");
+        String coordinatorHost = System.getenv("COORDINATOR_HOST");
+        String hostname        = System.getenv("HOSTNAME");
+
+        if (nbReducesStr == null || coordinatorHost == null) {
+            System.err.println("Missing env vars: NB_REDUCES, COORDINATOR_HOST");
             return;
         }
         nbReduces = Integer.parseInt(nbReducesStr);
+        String workerId = hostname != null ? hostname : "map-worker";
 
         try (ServerSocket serverSocket = new ServerSocket(Protocol.MAP_WORKER_PORT)) {
-            System.out.println("MapWorker listening on port " + Protocol.MAP_WORKER_PORT);
-            
+            System.out.println("MapWorker " + workerId + " listening on port " + Protocol.MAP_WORKER_PORT);
+
+            notifyReady(coordinatorHost, workerId);
+
             while (running) {
                 Socket clientSocket = serverSocket.accept();
                 new Thread(() -> handleClient(clientSocket)).start();
             }
         } catch (IOException e) {
-            if (running) {
-                e.printStackTrace();
-            }
+            if (running) e.printStackTrace();
         }
-        System.out.println("MapWorker stopped.");
+        System.out.println("MapWorker " + workerId + " stopped.");
     }
 
+    // -------------------------------------------------------------------------
+    // Signal de disponibilité au coordinator
+    // -------------------------------------------------------------------------
+
+    private static void notifyReady(String coordinatorHost, String workerId) {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            try {
+                if (attempt > 0) Thread.sleep(1000);
+                try (Socket s = new Socket(coordinatorHost, Protocol.COORDINATOR_READY_PORT);
+                     ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream())) {
+                    s.setSoTimeout(Protocol.TIMEOUT_MS);
+                    out.writeObject(new Message(MessageType.READY, workerId));
+                    out.flush();
+                }
+                System.out.println("READY sent to coordinator.");
+                return;
+            } catch (Exception e) {
+                System.out.println("Waiting for coordinator... attempt " + (attempt + 1));
+            }
+        }
+        System.err.println("Could not reach coordinator to send READY.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Gestion des connexions entrantes
+    // -------------------------------------------------------------------------
+
     private static void handleClient(Socket clientSocket) {
-        try (
+        try {
+            clientSocket.setSoTimeout(Protocol.TIMEOUT_MS);
             ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
-            ObjectInputStream in = new ObjectInputStream(clientSocket.getInputStream())
-        ) {
+            ObjectInputStream  in  = new ObjectInputStream(clientSocket.getInputStream());
+
             Message request = (Message) in.readObject();
             System.out.println("MapWorker received: " + request.getType());
 
             switch (request.getType()) {
                 case MAP_START:
-                    String filePath = request.getData();
-                    processFile(filePath);
+                    processFile(request.getData(), request.getOffset(), request.getLength());
                     out.writeObject(new Message(MessageType.MAP_SUCCESS));
+                    out.flush();
                     break;
+
                 case REDUCE_FETCH:
-                    int workerId = Integer.parseInt(request.getData());
+                    int reducerId = Integer.parseInt(request.getData());
                     Map<String, Integer> subMap = new HashMap<>();
                     for (Map.Entry<String, Integer> entry : currentCounts.entrySet()) {
-                        if (Protocol.getReduceWorkerForWord(entry.getKey(), nbReduces) == workerId) {
+                        if (Protocol.getReduceWorkerForWord(entry.getKey(), nbReduces) == reducerId) {
                             subMap.put(entry.getKey(), entry.getValue());
                         }
                     }
                     out.writeObject(new Message(MessageType.MAP_DATA, subMap));
+                    out.flush();
                     break;
+
                 case SHUTDOWN:
                     running = false;
                     break;
+
                 default:
                     System.out.println("Unknown message type: " + request.getType());
             }
         } catch (IOException | ClassNotFoundException e) {
-            e.printStackTrace();
+            if (running) e.printStackTrace();
         } finally {
-            try {
-                clientSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            try { clientSocket.close(); } catch (IOException e) { /* ignore */ }
         }
     }
 
-    private static void processFile(String filePath) {
-        System.out.println("Processing file: " + filePath);
-        try {
-            String content = new String(Files.readAllBytes(Paths.get(filePath)));
-            String[] words = content.split("\\W+");
-            for (String w : words) {
-                if (w.isEmpty()) continue;
-                String word = w.toLowerCase();
-                currentCounts.merge(word, 1, Integer::sum);
+    // -------------------------------------------------------------------------
+    // Lecture du fichier avec gestion des blocs (offset + length)
+    // -------------------------------------------------------------------------
+
+    private static void processFile(String filePath, long offset, long length) {
+        System.out.println("Processing " + filePath + " [offset=" + offset + ", length=" + length + "]");
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
+            raf.seek(offset);
+
+            // Si on n'est pas au début du fichier, sauter jusqu'au prochain mot complet
+            // pour éviter de compter un mot coupé à la frontière du bloc
+            if (offset > 0) {
+                int b;
+                do { b = raf.read(); } while (b != -1 && !Character.isWhitespace((char) b));
+                if (b == -1) return;
             }
-            System.out.println("Finished processing " + filePath + ". Total unique words so far: " + currentCounts.size());
+
+            long end = offset + length;
+            StringBuilder word = new StringBuilder();
+            int b;
+
+            while ((b = raf.read()) != -1) {
+                char c = (char) b;
+                if (Character.isLetterOrDigit(c)) {
+                    word.append(c);
+                } else {
+                    if (word.length() > 0) {
+                        currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
+                        word.setLength(0);
+                    }
+                    // Arrêter après la fin du bloc, mais seulement à une frontière de mot
+                    if (raf.getFilePointer() > end) break;
+                }
+            }
+            // Dernier mot sans espace final
+            if (word.length() > 0) {
+                currentCounts.merge(word.toString().toLowerCase(), 1, Integer::sum);
+            }
+
+            System.out.println("Done. Total unique words so far: " + currentCounts.size());
         } catch (IOException e) {
-            e.printStackTrace();
+            System.err.println("Error reading " + filePath + ": " + e.getMessage());
         }
     }
 }

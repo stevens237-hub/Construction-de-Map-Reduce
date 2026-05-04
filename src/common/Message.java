@@ -21,6 +21,12 @@ public class Message implements Serializable {
     /** Résultats intermédiaires : mot -> nombre d'occurrences. */
     private Map<String, Integer> wordCounts;
 
+    /** Offset de début dans le fichier (pour le découpage des gros fichiers). */
+    private long offset = 0;
+
+    /** Nombre d'octets à lire depuis l'offset (-1 = jusqu'à la fin). */
+    private long length = -1;
+
     /** Constructeur simple (sans données additionnelles). */
     public Message(MessageType type) {
         this.type = type;
@@ -38,20 +44,22 @@ public class Message implements Serializable {
         this.wordCounts = new HashMap<>(wordCounts);
     }
 
-    public MessageType getType() {
-        return type;
+    /** Constructeur pour MAP_START avec offset et length (découpage de gros fichiers). */
+    public Message(MessageType type, String data, long offset, long length) {
+        this.type = type;
+        this.data = data;
+        this.offset = offset;
+        this.length = length;
     }
 
-    public String getData() {
-        return data;
-    }
-
-    public Map<String, Integer> getWordCounts() {
-        return wordCounts;
-    }
+    public MessageType getType()             { return type; }
+    public String getData()                  { return data; }
+    public Map<String, Integer> getWordCounts() { return wordCounts; }
+    public long getOffset()                  { return offset; }
+    public long getLength()                  { return length; }
 
     @Override
     public String toString() {
-        return "Message{type=" + type + ", data='" + data + "', wordCounts=" + wordCounts + "}";
+        return "Message{type=" + type + ", data='" + data + "', offset=" + offset + ", length=" + length + "}";
     }
 }

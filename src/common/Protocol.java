@@ -16,12 +16,18 @@ public class Protocol {
     /** Port sur lequel chaque ReduceWorker attend les requêtes. */
     public static final int REDUCE_WORKER_PORT = 6000;
 
+    /** Port sur lequel le Coordinator attend les signaux READY des workers. */
+    public static final int COORDINATOR_READY_PORT = 7000;
+
     // -------------------------------------------------------------------------
-    // Timeouts
+    // Timeouts et limites
     // -------------------------------------------------------------------------
 
     /** Délai maximum (ms) pour qu'un worker réponde avant d'être considéré en panne. */
     public static final int TIMEOUT_MS = 10_000;
+
+    /** Nombre maximum de tentatives en cas d'échec d'une tâche map. */
+    public static final int MAX_RETRIES = 3;
 
     // -------------------------------------------------------------------------
     // Utilitaire de partitionnement
