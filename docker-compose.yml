@@ -28,6 +28,8 @@ services:
       dockerfile: src/mapworker/Dockerfile
     container_name: map-worker-1
     hostname: map-worker-1
+    environment:
+      - NB_REDUCES=2
     volumes:
       - ./texts:/app/texts
     networks:
@@ -39,6 +41,8 @@ services:
       dockerfile: src/mapworker/Dockerfile
     container_name: map-worker-2
     hostname: map-worker-2
+    environment:
+      - NB_REDUCES=2
     volumes:
       - ./texts:/app/texts
     networks:
